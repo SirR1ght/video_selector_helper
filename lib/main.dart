@@ -2,33 +2,32 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
-const Color kBackgroundColor = Color(0xFF0D1018);
+const Color kDefaultBg = Color(0xFF0D1018);
 
-void main() {
-  runApp(const VideoSelectorApp());
-}
+const List<({String label, Color color})> kAppBackgrounds =
+    <({String label, Color color})>[
+  (label: 'Dark / bgDefaultSecondary (main)', color: Color(0xFF0D1018)),
+  (label: 'Dark / bgDefaultPrimary', color: Color(0xFF06070B)),
+  (label: 'Dark / bgDefaultTertiary', color: Color(0xFF141926)),
+  (label: 'Light / bgDefaultSecondary', color: Color(0xFFBBC8D3)),
+  (label: 'Light / bgDefaultPrimary', color: Color(0xFFF4F7F8)),
+  (label: 'Light / bgDefaultTertiary', color: Color(0xFFFFFFFF)),
+];
+
+void main() => runApp(const VideoSelectorApp());
 
 class VideoSelectorApp extends StatelessWidget {
   const VideoSelectorApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Video Selector Helper',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        scaffoldBackgroundColor: kBackgroundColor,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: kBackgroundColor,
-          brightness: Brightness.dark,
-          surface: kBackgroundColor,
-        ),
-      ),
-      home: const VideoSelectorPage(),
-    );
-  }
+  Widget build(BuildContext context) => const MaterialApp(
+        title: 'Video Selector Helper',
+        debugShowCheckedModeBanner: false,
+        home: VideoSelectorPage(),
+      );
 }
 
 class VideoSelectorPage extends StatefulWidget {
@@ -40,8 +39,10 @@ class VideoSelectorPage extends StatefulWidget {
 
 class _VideoSelectorPageState extends State<VideoSelectorPage> {
   VideoPlayerController? _controller;
-  String? _fileName;
-  bool _loading = false;
+  bool _isInitialized = false;
+  Color _bg = kDefaultBg;
+  final List<({Color color, String label})> _customColors =
+      <({Color color, String label})>[];
 
   @override
   void dispose() {
@@ -50,103 +51,271 @@ class _VideoSelectorPageState extends State<VideoSelectorPage> {
   }
 
   Future<void> _pickVideo() async {
-    setState(() => _loading = true);
-    try {
-      final result = await FilePicker.pickFiles(type: FileType.video);
-      if (result == null || result.files.single.path == null) {
-        return;
-      }
-      final path = result.files.single.path!;
-      final newController = VideoPlayerController.file(File(path));
-      await newController.initialize();
-      newController.setLooping(true);
+    final FilePickerResult? result = await FilePicker.pickFiles(
+      type: FileType.video,
+    );
+    if (result == null || result.files.single.path == null) return;
 
-      await _controller?.dispose();
+    final VideoPlayerController? old = _controller;
+    setState(() {
+      _isInitialized = false;
+      _controller = null;
+    });
+    await old?.dispose();
 
-      if (!mounted) {
-        await newController.dispose();
-        return;
-      }
+    final VideoPlayerController controller = VideoPlayerController.file(
+      File(result.files.single.path!),
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    );
+    await controller.initialize();
+    await controller.setLooping(true);
+    await controller.setVolume(0);
+    await controller.play();
 
-      setState(() {
-        _controller = newController;
-        _fileName = result.files.single.name;
-      });
-      await newController.play();
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    if (!mounted) {
+      await controller.dispose();
+      return;
     }
+    setState(() {
+      _controller = controller;
+      _isInitialized = true;
+    });
+  }
+
+  Future<void> _addCustomColor() async {
+    final ({Color color, String label})? picked =
+        await showDialog<({Color color, String label})>(
+      context: context,
+      builder: (BuildContext _) => const _HexColorDialog(),
+    );
+    if (picked == null) return;
+    setState(() {
+      final bool exists = _customColors
+          .any((({Color color, String label}) e) => e.color == picked.color);
+      if (!exists) _customColors.add(picked);
+      _bg = picked.color;
+    });
+  }
+
+  void _removeCustomColor(Color color) {
+    setState(() {
+      _customColors.removeWhere(
+        (({Color color, String label}) e) => e.color == color,
+      );
+      if (_bg == color) _bg = kDefaultBg;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBackgroundColor,
+      backgroundColor: _bg,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  'Background Color HEX: #0D1018',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600),
-                ),
+        child: Column(
+          children: <Widget>[
+            _buildPalette(),
+            Expanded(
+              child: Center(
+                child: _isInitialized && _controller != null
+                    ? IgnorePointer(
+                        child: AspectRatio(
+                          aspectRatio: _controller!.value.aspectRatio,
+                          child: RepaintBoundary(
+                            child: VideoPlayer(_controller!),
+                          ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: _loading ? null : _pickVideo,
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: ElevatedButton.icon(
+                onPressed: _pickVideo,
                 icon: const Icon(Icons.video_library),
-                label: Text(_loading ? 'Loading…' : 'Select video'),
+                label: const Text('Pick video'),
               ),
-              if (_fileName != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  _fileName!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
-              const SizedBox(height: 16),
-              Expanded(child: _buildPlayer()),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildPlayer() {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
-      return const Center(
-        child: Text('No video selected', style: TextStyle(color: Colors.white38)),
-      );
-    }
-    return Column(
-      children: [
-        Expanded(
-          child: Center(
-            child: AspectRatio(
-              aspectRatio: controller.value.aspectRatio,
-              child: VideoPlayer(controller),
+  Widget _buildPalette() {
+    const Color selectedBg = Color(0xFF1F1F1F);
+    const TextStyle selectedLabel = TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w600,
+    );
+
+    return SizedBox(
+      height: 64,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: ActionChip(
+              avatar: const Icon(Icons.add, size: 18),
+              label: const Text('Add HEX'),
+              onPressed: _addCustomColor,
             ),
           ),
+          for (final ({String label, Color color}) entry in kAppBackgrounds)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: ChoiceChip(
+                avatar: _swatch(entry.color),
+                label: Text(entry.label),
+                selected: _bg == entry.color,
+                showCheckmark: false,
+                selectedColor: selectedBg,
+                labelStyle: _bg == entry.color ? selectedLabel : null,
+                onSelected: (_) => setState(() => _bg = entry.color),
+              ),
+            ),
+          for (final ({Color color, String label}) entry in _customColors)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: InputChip(
+                avatar: _swatch(entry.color),
+                label: Text(entry.label),
+                selected: _bg == entry.color,
+                showCheckmark: false,
+                selectedColor: selectedBg,
+                labelStyle: _bg == entry.color ? selectedLabel : null,
+                onSelected: (_) => setState(() => _bg = entry.color),
+                onDeleted: () => _removeCustomColor(entry.color),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _swatch(Color c) {
+    return Container(
+      width: 18,
+      height: 18,
+      decoration: BoxDecoration(
+        color: c,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.black26),
+      ),
+    );
+  }
+}
+
+class _HexColorDialog extends StatefulWidget {
+  const _HexColorDialog();
+
+  @override
+  State<_HexColorDialog> createState() => _HexColorDialogState();
+}
+
+class _HexColorDialogState extends State<_HexColorDialog> {
+  final TextEditingController _textController = TextEditingController();
+  String? _error;
+  ({Color color, String label})? _parsed;
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String raw) {
+    final ({({Color color, String label})? value, String? error}) r =
+        _tryParse(raw);
+    setState(() {
+      _parsed = r.value;
+      _error = r.error;
+    });
+  }
+
+  ({({Color color, String label})? value, String? error}) _tryParse(
+    String raw,
+  ) {
+    String s = raw.trim().toUpperCase();
+    if (s.isEmpty) return (value: null, error: null);
+    if (s.startsWith('#')) s = s.substring(1);
+    if (s.startsWith('0X')) s = s.substring(2);
+    // Drop alpha if user pasted full ARGB (FFRRGGBB).
+    if (s.length == 8) s = s.substring(2);
+    if (s.length != 6) {
+      return (value: null, error: 'Need 6 hex digits (RRGGBB)');
+    }
+    final int? rgb = int.tryParse(s, radix: 16);
+    if (rgb == null) {
+      return (value: null, error: 'Invalid hex characters');
+    }
+    return (
+      value: (color: Color(0xFF000000 | rgb), label: '#$s'),
+      error: null,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ({Color color, String label})? parsed = _parsed;
+    return AlertDialog(
+      title: const Text('Add custom color'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          TextField(
+            controller: _textController,
+            autofocus: true,
+            keyboardType: TextInputType.text,
+            autocorrect: false,
+            enableSuggestions: false,
+            style: const TextStyle(fontFamily: 'monospace'),
+            inputFormatters: <TextInputFormatter>[
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F]')),
+              LengthLimitingTextInputFormatter(6),
+            ],
+            decoration: InputDecoration(
+              prefixText: '#',
+              hintText: 'RRGGBB',
+              errorText: _error,
+            ),
+            onChanged: _onChanged,
+            onSubmitted: (_) {
+              if (parsed != null) Navigator.of(context).pop(parsed);
+            },
+          ),
+          if (parsed != null) ...<Widget>[
+            const SizedBox(height: 16),
+            Row(
+              children: <Widget>[
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: parsed.color,
+                    border: Border.all(color: Colors.black26),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(parsed.label),
+              ],
+            ),
+          ],
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
         ),
-        const SizedBox(height: 8),
-        VideoProgressIndicator(controller, allowScrubbing: true),
-        IconButton(
-          color: Colors.white,
-          iconSize: 48,
-          onPressed: () {
-            setState(() {
-              controller.value.isPlaying ? controller.pause() : controller.play();
-            });
-          },
-          icon: Icon(controller.value.isPlaying ? Icons.pause : Icons.play_arrow),
+        TextButton(
+          onPressed:
+              parsed == null ? null : () => Navigator.of(context).pop(parsed),
+          child: const Text('Add'),
         ),
       ],
     );
