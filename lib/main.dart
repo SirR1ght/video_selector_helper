@@ -142,6 +142,29 @@ class _VideoSelectorPageState extends State<VideoSelectorPage> {
     );
   }
 
+  String _hexCode(Color c) {
+    final int rgb = c.toARGB32() & 0xFFFFFF;
+    return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+  }
+
+  Widget _chipLabel(String label, Color color, bool selected) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(label),
+        Text(
+          _hexCode(color),
+          style: TextStyle(
+            fontSize: 10,
+            color: selected ? Colors.white70 : Colors.grey,
+            fontFamily: 'monospace',
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildPalette() {
     const Color selectedBg = Color(0xFF1F1F1F);
     const TextStyle selectedLabel = TextStyle(
@@ -150,7 +173,7 @@ class _VideoSelectorPageState extends State<VideoSelectorPage> {
     );
 
     return SizedBox(
-      height: 64,
+      height: 80,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -168,7 +191,7 @@ class _VideoSelectorPageState extends State<VideoSelectorPage> {
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: ChoiceChip(
                 avatar: _swatch(entry.color),
-                label: Text(entry.label),
+                label: _chipLabel(entry.label, entry.color, _bg == entry.color),
                 selected: _bg == entry.color,
                 showCheckmark: false,
                 selectedColor: selectedBg,
@@ -181,7 +204,7 @@ class _VideoSelectorPageState extends State<VideoSelectorPage> {
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: InputChip(
                 avatar: _swatch(entry.color),
-                label: Text(entry.label),
+                label: _chipLabel(entry.label, entry.color, _bg == entry.color),
                 selected: _bg == entry.color,
                 showCheckmark: false,
                 selectedColor: selectedBg,
